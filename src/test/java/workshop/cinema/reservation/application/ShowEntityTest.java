@@ -11,14 +11,10 @@ import workshop.cinema.base.domain.Clock;
 import workshop.cinema.reservation.application.ShowEntityCommand.ShowCommandEnvelope;
 import workshop.cinema.reservation.application.ShowEntityResponse.CommandProcessed;
 import workshop.cinema.reservation.application.ShowEntityResponse.CommandRejected;
-import workshop.cinema.reservation.domain.FixedClock;
-import workshop.cinema.reservation.domain.Show;
-import workshop.cinema.reservation.domain.ShowCommand;
+import workshop.cinema.reservation.domain.*;
 import workshop.cinema.reservation.domain.ShowCommand.CancelSeatReservation;
-import workshop.cinema.reservation.domain.ShowEvent;
 import workshop.cinema.reservation.domain.ShowEvent.SeatReservationCancelled;
 import workshop.cinema.reservation.domain.ShowEvent.SeatReserved;
-import workshop.cinema.reservation.domain.ShowId;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static workshop.cinema.reservation.domain.ShowCommandError.SEAT_NOT_AVAILABLE;
@@ -47,16 +43,19 @@ class ShowEntityTest {
     public void shouldReserveSeat() {
         //given
         var showId = ShowId.of();
-        EventSourcedBehaviorTestKit<ShowEntityCommand, ShowEvent, Show> showEntityKit = EventSourcedBehaviorTestKit.create(testKit.system(), ShowEntity.create(showId, clock));
-        var reserveSeat = randomReserveSeat(showId);
+        EventSourcedBehaviorTestKit<ShowEntityCommand, ShowEvent, Show> showEntityKit =
+                EventSourcedBehaviorTestKit.create(testKit.system(), ShowEntity.create(showId, clock));
+        ShowCommand.ReserveSeat reserveSeatCmd = randomReserveSeat(showId);
 
         //when
-        var result = showEntityKit.<ShowEntityResponse>runCommand(replyTo -> toEnvelope(reserveSeat, replyTo));
+        final EventSourcedBehaviorTestKit.CommandResultWithReply<ShowEntityCommand, ShowEvent, Show, ShowEntityResponse> result
+                = showEntityKit.<ShowEntityResponse>runCommand(replyTo -> toEnvelope(reserveSeatCmd, replyTo));
 
         //then
         assertThat(result.reply()).isInstanceOf(CommandProcessed.class);
         assertThat(result.event()).isInstanceOf(SeatReserved.class);
-        var reservedSeat = result.state().seats().get(reserveSeat.seatNumber()).get();
+
+        Seat reservedSeat = result.state().seats().get(reserveSeatCmd.seatNumber()).get();
         assertThat(reservedSeat.isReserved()).isTrue();
     }
 
@@ -64,7 +63,8 @@ class ShowEntityTest {
     public void shouldNotReserveTheAlreadyReservedSeat() {
         //given
         var showId = ShowId.of();
-        EventSourcedBehaviorTestKit<ShowEntityCommand, ShowEvent, Show> showEntityKit = EventSourcedBehaviorTestKit.create(testKit.system(), ShowEntity.create(showId, clock));
+        EventSourcedBehaviorTestKit<ShowEntityCommand, ShowEvent, Show> showEntityKit =
+                EventSourcedBehaviorTestKit.create(testKit.system(), ShowEntity.create(showId, clock));
         var reserveSeat = randomReserveSeat(showId);
 
         //when

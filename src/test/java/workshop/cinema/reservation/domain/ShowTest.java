@@ -1,8 +1,12 @@
 package workshop.cinema.reservation.domain;
 
 import io.vavr.collection.List;
-import org.junit.jupiter.api.Test;
+import io.vavr.control.Either;
+import org.junit.jupiter.api.*;
 import workshop.cinema.base.domain.Clock;
+import workshop.cinema.reservation.domain.ShowCommand.CancelSeatReservation;
+import workshop.cinema.reservation.domain.ShowCommand.CancelShow;
+import workshop.cinema.reservation.domain.ShowCommand.ReserveSeat;
 import workshop.cinema.reservation.domain.ShowEvent.SeatReservationCancelled;
 import workshop.cinema.reservation.domain.ShowEvent.SeatReserved;
 
@@ -11,59 +15,76 @@ import java.time.Instant;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static workshop.cinema.reservation.domain.DomainGenerators.randomShow;
+import static workshop.cinema.reservation.domain.SeatStatus.AVAILABLE;
+import static workshop.cinema.reservation.domain.SeatStatus.RESERVED;
+import static workshop.cinema.reservation.domain.SeatsCreator.SEAT_RANGE;
 import static workshop.cinema.reservation.domain.ShowBuilder.showBuilder;
 import static workshop.cinema.reservation.domain.ShowCommandError.*;
+import static workshop.cinema.reservation.domain.ShowCommandGenerators.randomReserveSeat;
 
+@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class ShowTest {
 
     private Clock clock = new FixedClock(Instant.now());
 
     @Test
+    @Order(1)
+    @DisplayName("La commande ReserveSeat entraine la génération d'un évènement de type ShowEvent")
     public void shouldReserveTheSeat() {
-        var show = randomShow(); //given
-        var reserveSeat = ShowCommandGenerators.randomReserveSeat(show.id());
-
-        var events = show.process(reserveSeat, clock).get(); //when
-
-        assertThat(events) //then
-                .containsOnly(new SeatReserved(show.id(), clock.now(), reserveSeat.seatNumber()));
+        // given randomShow()
+        Show show = showBuilder().withRandomSeats().build();
+        ReserveSeat reserveSeatCmd = randomReserveSeat(show.id());
+        // when we process the reserve seat command
+        List<ShowEvent> events = show.process(reserveSeatCmd, clock).get();
+        // then an event is produced
+        assertThat(events).containsOnly(new SeatReserved(show.id(), clock.now(), reserveSeatCmd.seatNumber()));
     }
 
     @Test
+    @Order(2)
+    @DisplayName("Une commande inconnue entraine une erreur")
     public void cantHandleCancelShowEvent() {
-        var show = randomShow(); //given
-        var cancelShow = new ShowCommand.CancelShow(show.id());
+        Show show = randomShow(); //given
+        CancelShow cancelShowCmd = new CancelShow(show.id());
 
-        var result = show.process(cancelShow, clock).getLeft(); //when
+        final Either<ShowCommandError, List<ShowEvent>> result = show.process(cancelShowCmd, clock);//when
 
-        assertThat(result).isEqualTo(UNSUPPORTED_COMMAND);
+        assertThat(result.isLeft()).isTrue();
+        assertThat(result.getLeft()).isEqualTo(UNSUPPORTED_COMMAND);
     }
 
     @Test
+    @Order(3)
+    @DisplayName("L'application d'un evènement entraine la création d'une nouvelle instance de Show")
     public void shouldReserveTheSeatWithApplyingEvent() {
         //given
-        var show = randomShow();
-        var reserveSeat = ShowCommandGenerators.randomReserveSeat(show.id());
+        Show show = randomShow();
 
+        ReserveSeat reserveSeatCmd = randomReserveSeat(show.id());
         //when
-        var events = show.process(reserveSeat, clock).get();
-        var updatedShow = apply(show, events);
-
+        List<ShowEvent> events = show.process(reserveSeatCmd, clock).get();
+        Show updatedShow = apply(show, events);
         //then
-        var reservedSeat = updatedShow.seats().get(reserveSeat.seatNumber()).get();
-        assertThat(events).containsOnly(new SeatReserved(show.id(), clock.now(), reserveSeat.seatNumber()));
+        Seat reservedSeat = updatedShow.seats().get(reserveSeatCmd.seatNumber()).get();
+
+        assertThat(show.availableSeats()).isEqualTo(10);
+        assertThat(updatedShow.availableSeats()).isEqualTo(9);
+        assertThat(events)
+                .containsOnly(new SeatReserved(show.id(), clock.now(), reserveSeatCmd.seatNumber()));
         assertThat(reservedSeat.isAvailable()).isFalse();
     }
 
     @Test
+    @Order(4)
+    @DisplayName("Réserver deux fois une même place entraine une erreur")
     public void shouldNotReserveAlreadyReservedSeat() {
         //given
-        var show = randomShow();
-        var reserveSeat = ShowCommandGenerators.randomReserveSeat(show.id());
+        Show show = randomShow();
+        ReserveSeat reserveSeat = randomReserveSeat(show.id());
 
         //when
-        var events = show.process(reserveSeat, clock).get();
-        var updatedShow = apply(show, events);
+        List<ShowEvent> events = show.process(reserveSeat, clock).get();
+        Show updatedShow = apply(show, events);
 
         //then
         assertThat(events).containsOnly(new SeatReserved(show.id(), clock.now(), reserveSeat.seatNumber()));
@@ -76,10 +97,12 @@ class ShowTest {
     }
 
     @Test
+    @Order(5)
+    @DisplayName("Impossible de réserver une place inexistante")
     public void shouldNotReserveNotExistingSeat() {
         //given
-        var show = randomShow();
-        var reserveSeat = new ShowCommand.ReserveSeat(show.id(), new SeatNumber(SeatsCreator.SEAT_RANGE.last() + 1));
+        Show show = randomShow();
+        ReserveSeat reserveSeat = new ReserveSeat(show.id(), new SeatNumber(SEAT_RANGE.last() + 1));
 
         //when
         ShowCommandError result = show.process(reserveSeat, clock).getLeft();
@@ -89,11 +112,13 @@ class ShowTest {
     }
 
     @Test
+    @Order(6)
+    @DisplayName("Annulation d'une réservation")
     public void shouldCancelSeatReservation() {
         //given
-        var reservedSeat = new Seat(new SeatNumber(2), SeatStatus.RESERVED, new BigDecimal("123"));
-        var show = showBuilder().withRandomSeats().withSeat(reservedSeat).build();
-        var cancelSeatReservation = new ShowCommand.CancelSeatReservation(show.id(), reservedSeat.number());
+        Seat reservedSeat = new Seat(new SeatNumber(2), RESERVED, new BigDecimal("123"));
+        Show show = showBuilder().withRandomSeats().withSeat(reservedSeat).build();
+        CancelSeatReservation cancelSeatReservation = new CancelSeatReservation(show.id(), reservedSeat.number());
 
         //when
         var events = show.process(cancelSeatReservation, clock).get();
@@ -103,14 +128,16 @@ class ShowTest {
     }
 
     @Test
+    @Order(7)
+    @DisplayName("Impossible d'annuler une réservation sur une place disponible")
     public void shouldNotCancelReservationOfAvailableSeat() {
         //given
-        var availableSeat = new Seat(new SeatNumber(2), SeatStatus.AVAILABLE, new BigDecimal("123"));
-        var show = showBuilder().withRandomSeats().withSeat(availableSeat).build();
-        var cancelSeatReservation = new ShowCommand.CancelSeatReservation(show.id(), availableSeat.number());
+        Seat availableSeat = new Seat(new SeatNumber(2), AVAILABLE, new BigDecimal("123"));
+        Show show = showBuilder().withRandomSeats().withSeat(availableSeat).build();
+        CancelSeatReservation cancelSeatReservation = new CancelSeatReservation(show.id(), availableSeat.number());
 
         //when
-        var result = show.process(cancelSeatReservation, clock).getLeft();
+        final ShowCommandError result = show.process(cancelSeatReservation, clock).getLeft();
 
         //then
         assertThat(result).isEqualTo(SEAT_NOT_RESERVED);

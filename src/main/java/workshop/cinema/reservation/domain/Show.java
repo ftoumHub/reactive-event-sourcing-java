@@ -43,6 +43,14 @@ public record Show(ShowId id, String title, Map<SeatNumber, Seat> seats) impleme
         return new Show(showId, "Show title " + showId.id(), SeatsCreator.createSeats(INITIAL_PRICE));
     }
 
+    public Integer reservedSeats() {
+        return this.seats.filterValues(Seat::isReserved).size();
+    }
+
+    public Integer availableSeats() {
+        return this.seats.filterValues(Seat::isAvailable).size();
+    }
+
     // Traitement des commandes
     public Either<ShowCommandError, List<ShowEvent>> process(ShowCommand command,
                                                              Clock clock) {
@@ -56,25 +64,27 @@ public record Show(ShowId id, String title, Map<SeatNumber, Seat> seats) impleme
     private Either<ShowCommandError, List<ShowEvent>> handleReservation(ReserveSeat reserveSeat,
                                                                         Clock clock) {
         SeatNumber seatNumber = reserveSeat.seatNumber();
-        return seats.get(seatNumber).<Either<ShowCommandError, List<ShowEvent>>>map(seat -> {
-            if (seat.isAvailable()) {
-                return right(List(new SeatReserved(id, clock.now(), seatNumber)));
-            } else {
-                return left(SEAT_NOT_AVAILABLE);
-            }
-        }).getOrElse(left(SEAT_NOT_EXISTS));
+        return seats.get(seatNumber)
+                .<Either<ShowCommandError, List<ShowEvent>>>map(seat -> {
+                    if (seat.isAvailable()) {
+                        return right(List(new SeatReserved(id, clock.now(), seatNumber)));
+                    } else {
+                        return left(SEAT_NOT_AVAILABLE);
+                    }
+                }).getOrElse(left(SEAT_NOT_EXISTS));
     }
 
     private Either<ShowCommandError, List<ShowEvent>> handleCancellation(CancelSeatReservation cancelSeatReservation,
                                                                          Clock clock) {
         SeatNumber seatNumber = cancelSeatReservation.seatNumber();
-        return seats.get(seatNumber).<Either<ShowCommandError, List<ShowEvent>>>map(seat -> {
-            if (seat.isReserved()) {
-                return right(List(new SeatReservationCancelled(id, clock.now(), seatNumber)));
-            } else {
-                return left(SEAT_NOT_RESERVED);
-            }
-        }).getOrElse(left(SEAT_NOT_EXISTS));
+        return seats.get(seatNumber)
+                .<Either<ShowCommandError, List<ShowEvent>>>map(seat -> {
+                    if (seat.isReserved()) {
+                        return right(List(new SeatReservationCancelled(id, clock.now(), seatNumber)));
+                    } else {
+                        return left(SEAT_NOT_RESERVED);
+                    }
+                }).getOrElse(left(SEAT_NOT_EXISTS));
     }
 
     // Traitement des évènements
